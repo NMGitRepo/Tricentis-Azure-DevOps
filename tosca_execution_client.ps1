@@ -1,8 +1,9 @@
-﻿#Requires -Version 3.0
+#Requires -Version 3.0
 
 #####################################################################################
 #
 # Tosca Execution Client for PowerShell
+# Version 1.0.0
 # Triggers Tosca TestEvents via Tosca Server Execution API
 #
 #####################################################################################
@@ -18,7 +19,7 @@ param(
     [string]$projectName,
     [string]$events,
     [string]$eventsConfigFilePath,
-    
+   
     #Optional parameters
     [string]$clientId,
     [string]$clientSecret,
@@ -34,7 +35,7 @@ param(
     [switch]$fetchPartialResults,
     [switch]$fetchResultsOnly,
     [string]$logFolderPath = "logs",
-    [int]$pollingInterval = 60,
+    [int]$pollingInterval = 5,
     [int]$requestTimeout = 180,
     [string]$resultsFileName = "",
     [string]$resultsFolderPath = "results",
@@ -72,7 +73,7 @@ function displayHelp() {
     Write-Output "Mandatory parameters:"
     Write-Output " toscaServerUrl            URL of Tosca Server, e.g. https://myserver.tricentis.com or http://111.111.111.0:81."
     Write-Output " projectName               Project root name of the Tosca project where the event is located."
-    Write-Output " events                    Stringified JSON array containing the names or uniqueIds of the events that you want to execute. If you want to overwrite TCPs or Agent Characteristics for a specific event, use the ""eventsConfigFilePath"" parameter instead."
+    Write-Output " events                    Names or uniqueIds of the events that you want to execute, separated by comma. If you want to overwrite TCPs or Agent Characteristics for a specific event, use the ""eventsConfigFilePath"" parameter instead."
     Write-Output " eventsConfigFilePath      Path to the JSON file that contains the event configuration, including TCPs and Agent Characteristics. If you use this parameter, you don't need to use the ""events"" parameter."
 
     Write-Output "`nOptions:"
@@ -123,7 +124,7 @@ function log([string]$logLevel, [string]$logMessage) {
     $logFilePath = "$logFolderPath\$logFileName"
 
     try {        
-        $message | Out-File $logFilePath -Append       
+        $message | Out-File $logFilePath -Append
 
     } catch {
         Write-Output "$ts [ERR] ToscaExecutionClient failed to write the log message in ""$path""."
@@ -192,7 +193,7 @@ function getAbsolutePath([string]$path, [bool]$suppressLog=$false) {
         if ( $isAbsolutePath -eq $false ) {
             $path = [System.IO.Path]::Combine($PSScriptRoot, $path);
         }
-        
+       
     } catch {
         if ( $suppressLog -eq $true ) {
             Write-Output "$ts [ERR] ToscaExecutionClient failed to resolve path ""$path""."
@@ -258,8 +259,7 @@ function writeResults([bool]$writePartialResults = $false) {
         }
 
         try {
-            $Utf8Encoding = New-Object System.Text.UTF8Encoding $False
-            [System.IO.File]::WriteAllLines($resultsFilePath, $executionResults, $Utf8Encoding)
+            $executionResults | Out-File $resultsFilePath
             log "INF" "Finished writing execution results to file ""$resultsFilePath""."
 
         } catch {
@@ -300,7 +300,9 @@ function generateHeader() {
 #   Timestamp
 #######################################
 function getTimestamp() {
-    return [DateTimeOffset]::Now.ToUnixTimeSeconds()
+    $currentDate = (Get-Date).ToUniversalTime()
+
+    return [System.Math]::Truncate((Get-Date -Date $currentDate -UFormat %s))
 }
 
 #######################################
@@ -328,7 +330,7 @@ function fetchOrRefreshAccessToken() {
         }
 
         $contentType = "application/x-www-form-urlencoded"
-    
+   
         try {
             $accessTokenResponse = Invoke-WebRequest     `
                 -Uri "$toscaServerUrl/tua/connect/token" `
@@ -342,7 +344,7 @@ function fetchOrRefreshAccessToken() {
 
             $accessTokenResponseAsJson = ConvertFrom-Json($accessTokenResponse.Content)
             $expiresIn = $accessTokenResponseAsJson.expires_in
-            
+           
             $script:accessToken = $accessTokenResponseAsJson.access_token
             $script:tokenExpirationDate = $now + ($expiresIn * 0.8)
         }
@@ -371,7 +373,7 @@ function fetchOrRefreshAccessToken() {
 #######################################
 function enqueueExecution() {
     $header = generateHeader
-    $body = "{""ProjectName"":""$projectName"",""ExecutionEnvironment"":""$executionEnvironment"",""Events"":$events,""ImportResult"":$($importResults.ToLower()),""Creator"":""$creator""}"
+    $body = "{""ProjectName"":""$projectName"",""ExecutionEnviroment"":""$executionEnvironment"",""Events"":$events,""ImportResult"":$($importResults.ToLower()),""Creator"":""$creator""}"
     $contentType = "application/json"
 
     log "INF" "Enqueue execution with provided parameters..."
@@ -401,7 +403,7 @@ function enqueueExecution() {
             log "DBG" "Status code of the response = HTTP code $status."
             log "DBG" "Body of the response = $content"
         }
-        
+       
         $executionResponseAsJson = ConvertFrom-Json($content)
         $script:executionId = $executionResponseAsJson.ExecutionId
 
@@ -413,7 +415,7 @@ function enqueueExecution() {
         } else {
             log "INF" "Successfully enqueued execution with id ""$executionId""."
         }
-        
+       
     }
     catch {
         log "ERR" "ToscaExecutionClient failed to enqueue the execution."
@@ -509,7 +511,7 @@ function fetchExecutionResults ([bool]$fetchPartialResults = $false) {
             log "DBG" "Status code of the response = HTTP code $status."
             log "DBG" "Body of the response = $content"
         }
-        
+       
         # Reset execution results variable
         $script:executionResults = ""
 
@@ -518,10 +520,10 @@ function fetchExecutionResults ([bool]$fetchPartialResults = $false) {
             log "INF" "Sucessfully fetched results for execution with id ""$executionId""."
             $script:executionResults=$content
         }
-        # Not all results are available (E.g. cancelled events, configuration errors) 
+        # Not all results are available (E.g. cancelled events, configuration errors)
         elseif ( $status -eq 206 ) {
             log "WRN" "Not all execution results have been returned for execution with id ""$executionId"". Check AOS, DEX Server and DEX agent logs."
-            $script:executionResults=$content
+            $script:executionResults="$responseBody"
         }
         # Handle non existing results when fetchPartialResults option is activated
         elseif ( $fetchPartialResults -eq $true ) {
@@ -545,10 +547,10 @@ function fetchExecutionResults ([bool]$fetchPartialResults = $false) {
 # Print help and exit if help switch is enabled
 if ( $help -eq $true ) {
     displayHelp
-    exit 0 
+    exit 0
 }
 
-# Create directories for log and results folders 
+# Create directories for log and results folders
 $logFolderPath = getAbsolutePath $logFolderPath $true
 createDirectory $logFolderPath $true
 
@@ -597,10 +599,10 @@ if ( $fetchResultsOnly -eq $true ) {
     # Enqueue execution
     enqueueExecution
 
-    # Skip fetching of execution results when enqueueOnlyOption is given 
+    # Skip fetching of execution results when enqueueOnlyOption is given
     if ( $enqueueOnly -eq $true ) {
         log "INF" "Option enqueueOnly is activated."
-        log "INF" "Enqueing execution has sucessfully finished" 
+        log "INF" "Enqueing execution has sucessfully finished"
         log "INF" "Stopping ToscaExecutionClient..."
         exit 0
     }
@@ -608,7 +610,7 @@ if ( $fetchResultsOnly -eq $true ) {
 
 # Handle missing execution id
 if ( ([String]::IsNullOrEmpty($executionId)) ) {
-    log "ERR" "ExecutionId is missing or empty." 
+    log "ERR" "ExecutionId is missing or empty."
     log "INF" "Stopping ToscaExecutionClient..."
     exit 1
 }
@@ -616,57 +618,37 @@ if ( ([String]::IsNullOrEmpty($executionId)) ) {
 # Start status polling
 log "INF" "Starting execution status polling with an interval of $pollingInterval seconds..."
 $executionTimeout = $(getTimestamp) + $clientTimeout
-$keepPolling = $true;
-while($keepPolling -eq $true) {
+
+while( ($(getTimestamp) -le $executionTimeout) -and -not ($executionStatus -like "*Completed*") -and -not ($executionStatus -eq "Error") -and -not ($executionStatus -eq "Cancelled") ) {
     fetchExecutionStatus
     log "INF" "Status of execution with id ""${executionId}"": ""${executionStatus}"""
-
-    $keepPolling = ($(getTimestamp) -le $executionTimeout) -and -not ($executionStatus -like "*Completed*") -and -not ($executionStatus -eq "Error") -and -not ($executionStatus -eq "Cancelled");
-
-    if($keepPolling -eq $false){
-        break;
-    }
 
     if ( $fetchPartialResults -eq $true ) {
         # Fetch partial results for the execution
         log "INF" "Fetching partial results ..."
-        
+       
         # Fetch partial results
         fetchExecutionResults $true
-        
+       
         # Write partial results
         writeResults $true
     }
-    
+
     log "INF" "Starting next polling cycle in $pollingInterval seconds..."
     Start-Sleep -Seconds $pollingInterval
 }
 
 # Check for execution status after results polling
-
-if ( ($executionStatus -like "*Completed*") )  
-{
+if ( ($executionStatus -like "*Completed*") -or ($executionStatus -eq "Error") -or ($executionStatus -eq "Cancelled") ) {
     log "INF" "Execution with id ""${executionId}"" finished."
 
     # Fetch results when execution is finished
     fetchExecutionResults $false
-    
+   
     # Write execution results
     writeResults $false
     log "INF" "Stopping ToscaExecutionClient..."
     exit 0
-}
-elseif ( ($executionStatus -eq "Error") -or ($executionStatus -eq "Cancelled")) {
-    log "ERR" "Execution with id ""${executionId}"" Error or Cancelled!"
-
-    # Fetch results when execution is finished
-    fetchExecutionResults $false
-    
-    # Write execution results
-    writeResults $false
-    log "INF" "Stopping ToscaExecutionClient..."
-    exit 1
-
 
 } else {
     log "ERR" "Execution exceeded clientTimeout of $clientTimeout seconds. Stopping ToscaExecutionClient..."
