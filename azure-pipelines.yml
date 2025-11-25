@@ -7,6 +7,7 @@ trigger:
 - main
 
 stages:
+
 - stage: Test
   displayName: Test
   jobs:
@@ -26,12 +27,12 @@ stages:
             -eventsConfigFilePath "testEvents.json"
             -clientId "$(ClientID)"
             -clientSecret "$(ClientSecret)"
-            -creator "ToscaExecutionClient ADO Pipeline"
+            -creator "ADO Pipeline DEX"
             -resultsFileName "results.xml"
             -resultsFolderPath "C:/temp/results"
             -debug "true"
         displayName: 'Execute Tosca TestEvent(s) via ToscaExecutionClient'
-  
+ 
       - task: PowerShell@2
         inputs:
           targetType: 'inline'
